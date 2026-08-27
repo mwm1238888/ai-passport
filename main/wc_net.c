@@ -112,7 +112,10 @@ static esp_err_t portal_get(httpd_req_t *req) {
 static esp_err_t portal_save(httpd_req_t *req) {
     char body[128] = {0};
     int len = httpd_req_recv(req, body, sizeof(body) - 1);
-    if (len < 0) len = 0; body[len] = 0;
+    if (len < 0) {
+        len = 0;
+    }
+    body[len] = 0;
     char ssid[40] = {0}, pass[64] = {0};
     /* tiny form decoder */
     char *p = strstr(body, "ssid="); if (p) sscanf(p, "ssid=%39[^&]", ssid);
