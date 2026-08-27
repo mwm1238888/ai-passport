@@ -1,0 +1,11 @@
+dependencies:
+  espressif/button:
+    version: 4.2.0
+  espressif/esp_codec_dev:
+    version: 1.6.2
+  espressif/esp_lvgl_port:
+    version: 2.9.0
+  joltwallet/littlefs:
+    version: 1.22.3
+  lvgl/lvgl:
+    version: 9.5.0
