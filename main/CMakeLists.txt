@@ -19,5 +19,5 @@ idf_component_register(
         lwip
         esp_http_server
         esp_http_client
-        cJSON
+        json
 )
