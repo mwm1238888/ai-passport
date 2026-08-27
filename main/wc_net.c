@@ -189,7 +189,7 @@ void wc_net_init(void) {
     esp_netif_create_default_wifi_ap();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_wifi_init(&cfg);
-    esp_wifi_set_ps(WIFI_PS_MIN_MODE);
+    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
     s_wifi_ready = true;
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL);
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL);
