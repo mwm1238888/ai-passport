@@ -7,6 +7,7 @@
 #include "bsp_battery.h"
 #include "lvgl.h"
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 /* ---- inspirational quotes (extern-declared in wc_config.h) ---- */
