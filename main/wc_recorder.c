@@ -27,11 +27,11 @@ static bool s_mounted = false;
 static bool mount_fs(void) {
     if (s_mounted) return true;
     esp_vfs_littlefs_conf_t conf = {
+        .base_path = WC_REC_MOUNT,
         .partition_label = WC_REC_PARTITION,
-        .mount_point = WC_REC_MOUNT,
-        .max_files = 4,
+        .format_if_mount_failed = true,
     };
-    if (esp_vfs_littlefs_mount(&conf) != ESP_OK) {
+    if (esp_vfs_littlefs_register(&conf) != ESP_OK) {
         ESP_LOGE(TAG, "mount failed");
         return false;
     }
