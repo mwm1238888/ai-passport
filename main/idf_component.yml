@@ -1,0 +1,3 @@
+dependencies:
+  espressif/littlefs:
+    version: "^1.0.0"

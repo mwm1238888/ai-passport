@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "wc_state.c"
+        "wc_audio.c"
+        "wc_scheduler.c"
+        "wc_recorder.c"
+        "wc_net.c"
+        "wc_ui.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        bsp
+        nvs_flash
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_timer
+        lwip
+        esp_http_server
+        esp_http_client
+        cJSON
+)
