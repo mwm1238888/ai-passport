@@ -45,6 +45,7 @@ typedef struct {
     uint16_t hydration_min;
     uint16_t quote_min;
     uint8_t  muted;
+    uint8_t  theme;                    /* 0=Pixel, 1=HUD */
     char     weather_city[24];
     char     weather_key[48];
 } wc_settings_t;

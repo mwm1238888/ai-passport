@@ -8,7 +8,7 @@
 #include <string.h>
 
 #define WC_CFG_MAGIC   0x57434D50U   /* 'WCMP' */
-#define WC_CFG_VERSION 1
+#define WC_CFG_VERSION 2
 #define WC_NVS_NS      "wcomp"
 #define WC_NVS_KEY     "cfg"
 #define WC_QUEUE_LEN   16
@@ -45,6 +45,7 @@ static void defaults_apply(wc_settings_t *s) {
     s->hydration_min = WC_HYDRATION_MIN;
     s->quote_min = WC_QUOTE_MIN;
     s->muted = 0;
+    s->theme = 0;                     /* Pixel */
     s->weather_city[0] = 0;
     s->weather_key[0] = 0;
 }

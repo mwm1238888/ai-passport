@@ -9,6 +9,9 @@ idf_component_register(
         "wc_ui.c"
         "ui_pixel.c"
         "ui_pixel_math.c"
+        "ui_theme.c"
+        "ui_theme_pixel.c"
+        "ui_theme_hud.c"
         "fonts/wc_cn_20.c"
     INCLUDE_DIRS
         "."
