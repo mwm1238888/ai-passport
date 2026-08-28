@@ -1,11 +1,13 @@
 #include "ui_pixel_math.h"
 
-int ui_pixel_blink_frame(int ms) {
-    int phase = ms % 2000;
-    return (phase >= 1700 && phase < 1850) ? 1 : 0;
+int ui_pixel_blink_frame(uint32_t elapsed_ms)
+{
+    uint32_t phase = elapsed_ms % 2000U;
+    return phase >= 1650U && phase < 1800U;
 }
 
-int ui_pixel_jump_offset(int frame) {
-    static const int offsets[] = {0, -3, -5, -3, 0};
-    return offsets[frame % 5];
+int ui_pixel_jump_offset(unsigned frame)
+{
+    static const int offsets[] = { 0, -3, -5, -3, 0 };
+    return frame < sizeof(offsets) / sizeof(offsets[0]) ? offsets[frame] : 0;
 }

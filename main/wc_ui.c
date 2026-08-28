@@ -5,6 +5,8 @@
 #include "wc_config.h"
 #include "bsp_display.h"
 #include "bsp_battery.h"
+#include "ui_pixel.h"
+#include "fonts/wc_cn_20.h"
 #include "lvgl.h"
 #include <stdio.h>
 #include <string.h>
@@ -29,32 +31,12 @@ static char s_weather_text[32] = "";
 static bool s_reminder_active = false;
 static wc_event_id_t s_reminder_id = WC_EV_NONE;
 
-static lv_obj_t *title_lbl;
-static lv_obj_t *body_lbl;
-static lv_obj_t *hint_lbl;
-
-static void build_layout(void) {
-    lv_obj_t *scr = lv_screen_active();
-    lv_obj_clean(scr);
-    lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
-
-    title_lbl = lv_label_create(scr);
-    lv_obj_set_style_text_color(title_lbl, lv_color_white(), 0);
-    lv_obj_set_style_text_font(title_lbl, &lv_font_montserrat_20, 0);
-    lv_obj_align(title_lbl, LV_ALIGN_TOP_MID, 0, 10);
-
-    body_lbl = lv_label_create(scr);
-    lv_obj_set_style_text_color(body_lbl, lv_color_white(), 0);
-    lv_obj_set_style_text_font(body_lbl, &lv_font_montserrat_28, 0);
-    lv_obj_align(body_lbl, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_width(body_lbl, 220);
-    lv_label_set_long_mode(body_lbl, LV_LABEL_LONG_WRAP);
-
-    hint_lbl = lv_label_create(scr);
-    lv_obj_set_style_text_color(hint_lbl, lv_color_hex(0xAAAAAA), 0);
-    lv_obj_set_style_text_font(hint_lbl, &lv_font_montserrat_14, 0);
-    lv_obj_align(hint_lbl, LV_ALIGN_BOTTOM_MID, 0, -10);
-}
+static lv_obj_t *s_scr;      /* pixel-theme screen for the current page */
+static lv_obj_t *s_body;     /* content label inside the paper panel */
+static lv_obj_t *s_hint;     /* bottom hint label next to the mascot */
+static lv_obj_t *s_mascot;   /* TV-robot mascot */
+static lv_obj_t *s_popup;    /* reminder popup panel, NULL when closed */
+static int s_built_page = -1;
 
 static const char *page_title(wc_page_t p) {
     switch (p) {
@@ -68,6 +50,37 @@ static const char *page_title(wc_page_t p) {
     }
 }
 
+static const lv_font_t *body_font(wc_page_t p) {
+    return (p == WC_PAGE_HOME) ? &lv_font_montserrat_28 : &wc_cn_20;
+}
+
+static void build_layout(wc_page_t p) {
+    lv_obj_t *old = s_scr;
+    ui_pixel_scr_opts_t opts = {
+        .title = page_title(p),
+        .title_font = &wc_cn_20,
+        .bg = 0,
+    };
+    s_scr = ui_pixel_screen_create_opts(&opts);
+
+    lv_obj_t *panel = ui_pixel_panel_create(s_scr, 16, 56, 208, 168, UI_PAPER);
+    s_body = ui_pixel_label(panel, "", body_font(p), UI_INK);
+    lv_obj_set_width(s_body, 184);
+    lv_label_set_long_mode(s_body, LV_LABEL_LONG_WRAP);
+    lv_obj_align(s_body, LV_ALIGN_TOP_LEFT, 0, 8);
+
+    s_mascot = ui_pixel_mascot_create(s_scr, 16, 230);
+
+    s_hint = ui_pixel_label(s_scr, "", &wc_cn_20, UI_INK);
+    lv_obj_set_width(s_hint, 156);
+    lv_label_set_long_mode(s_hint, LV_LABEL_LONG_WRAP);
+    lv_obj_align(s_hint, LV_ALIGN_TOP_LEFT, 66, 244);
+
+    s_popup = NULL;
+    lv_screen_load(s_scr);
+    if (old) lv_obj_delete(old);
+}
+
 static void render_home(void) {
     char buf[64];
     if (wc_net_time_synced()) {
@@ -77,9 +90,9 @@ static void render_home(void) {
     } else {
         snprintf(buf, sizeof(buf), "--:--");
     }
-    lv_label_set_text(body_lbl, buf);
+    lv_label_set_text(s_body, buf);
     snprintf(buf, sizeof(buf), "电:%d%%  下页:OK", bsp_battery_soc());
-    lv_label_set_text(hint_lbl, buf);
+    lv_label_set_text(s_hint, buf);
 }
 
 static void render_weather(void) {
@@ -88,14 +101,14 @@ static void render_weather(void) {
         snprintf(buf, sizeof(buf), "%d°C\n%s", s_weather_temp, s_weather_text);
     else
         snprintf(buf, sizeof(buf), "OK刷新");
-    lv_label_set_text(body_lbl, buf);
-    lv_label_set_text(hint_lbl, "需配WiFi+天气Key");
+    lv_label_set_text(s_body, buf);
+    lv_label_set_text(s_hint, "需配WiFi+天气Key");
 }
 
 static void render_quote(void) {
     int idx = s_quote_idx % (int)WC_QUOTES_COUNT;
-    lv_label_set_text(body_lbl, WC_QUOTES[idx]);
-    lv_label_set_text(hint_lbl, "OK换一句");
+    lv_label_set_text(s_body, WC_QUOTES[idx]);
+    lv_label_set_text(s_hint, "OK换一句");
 }
 
 static void render_remind(void) {
@@ -105,8 +118,8 @@ static void render_remind(void) {
         "闹铃 %02d:%02d\n久坐 %dmin\n喝水 %dmin\n下班 %02d:%02d",
         s->alarm_h, s->alarm_m, s->sedentary_min, s->hydration_min,
         s->offwork_h, s->offwork_m);
-    lv_label_set_text(body_lbl, buf);
-    lv_label_set_text(hint_lbl, "时间到会弹窗");
+    lv_label_set_text(s_body, buf);
+    lv_label_set_text(s_hint, "时间到会弹窗");
 }
 
 static void render_recorder(void) {
@@ -116,8 +129,8 @@ static void render_recorder(void) {
     const char *stt = (st == WC_REC_RECORDING) ? "REC" :
                       (st == WC_REC_PLAYING) ? "PLAY" : "IDLE";
     snprintf(buf, sizeof(buf), "%s\n文件:%d", stt, n);
-    lv_label_set_text(body_lbl, buf);
-    lv_label_set_text(hint_lbl, "OK开始/停  长按播放");
+    lv_label_set_text(s_body, buf);
+    lv_label_set_text(s_hint, "OK开始/停  长按播放");
 }
 
 static void render_settings(void) {
@@ -127,12 +140,11 @@ static void render_settings(void) {
         "闹铃 %02d:%02d\n下班 %02d:%02d\n久坐%d 喝水%d 语录%d",
         s->alarm_h, s->alarm_m, s->offwork_h, s->offwork_m,
         s->sedentary_min, s->hydration_min, s->quote_min);
-    lv_label_set_text(body_lbl, buf);
-    lv_label_set_text(hint_lbl, "见wc_config.h调参");
+    lv_label_set_text(s_body, buf);
+    lv_label_set_text(s_hint, "见wc_config.h调参");
 }
 
 static void render_page(void) {
-    lv_label_set_text(title_lbl, page_title(wc_state_page()));
     switch (wc_state_page()) {
     case WC_PAGE_HOME:     render_home(); break;
     case WC_PAGE_WEATHER:  render_weather(); break;
@@ -144,6 +156,43 @@ static void render_page(void) {
     }
 }
 
+/* ---- reminder popup (silent static reminder, only the alarm has sound) ---- */
+static const char *reminder_msg(wc_event_id_t id) {
+    switch (id) {
+    case WC_EV_ALARM:     return "该起床啦！";
+    case WC_EV_SEDENTARY: return "久坐了，动一动";
+    case WC_EV_HYDRATION: return "喝口水吧";
+    case WC_EV_OFFWORK:   return "下班辛苦啦！";
+    default:              return "提醒";
+    }
+}
+
+static void jump_again_cb(lv_timer_t *t)
+{
+    ui_pixel_mascot_jump((lv_obj_t *)t->user_data);
+}
+
+static void popup_show(wc_event_id_t id) {
+    if (s_popup) return;
+    uint32_t accent = (id == WC_EV_ALARM) ? UI_RED : UI_INK;
+    s_popup = ui_pixel_panel_create(s_scr, 30, 96, 180, 128, UI_PAPER);
+
+    lv_obj_t *t = ui_pixel_label(s_popup, "提醒", &wc_cn_20, accent);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 2);
+
+    lv_obj_t *m = ui_pixel_label(s_popup, reminder_msg(id), &wc_cn_20, UI_INK);
+    lv_obj_set_width(m, 148);
+    lv_label_set_long_mode(m, LV_LABEL_LONG_WRAP);
+    lv_obj_align(m, LV_ALIGN_CENTER, 0, 8);
+
+    lv_obj_t *h = ui_pixel_label(s_popup, "任意键关闭", &wc_cn_20, 0x52525B);
+    lv_obj_align(h, LV_ALIGN_BOTTOM_MID, 0, -2);
+
+    ui_pixel_mascot_jump(s_mascot);
+    lv_timer_t *tm = lv_timer_create(jump_again_cb, 260, s_mascot);
+    lv_timer_set_repeat_count(tm, 1);
+}
+
 /* ---- key handling ---- */
 static void on_ok(void) {
     switch (wc_state_page()) {
@@ -153,6 +202,7 @@ static void on_ok(void) {
         if (wc_weather_fetch(s->weather_city, s->weather_key, &w)) {
             s_weather_temp = w.temp;
             strncpy(s_weather_text, w.text, sizeof(s_weather_text) - 1);
+            s_weather_text[sizeof(s_weather_text) - 1] = '\0';
         }
         break;
     }
@@ -203,18 +253,17 @@ void wc_ui_dispatch(const wc_event_t *ev) {
 void wc_ui_refresh(void) {
     if (!bsp_lvgl_lock(100)) return;
     if (s_reminder_active) {
-        const char *msg = "提醒";
-        switch (s_reminder_id) {
-        case WC_EV_ALARM:     msg = "该起床啦!"; break;
-        case WC_EV_SEDENTARY: msg = "久坐了,动一动"; break;
-        case WC_EV_HYDRATION: msg = "喝口水吧"; break;
-        case WC_EV_OFFWORK:   msg = "下班辛苦啦!"; break;
-        default: break;
-        }
-        lv_label_set_text(title_lbl, "提醒");
-        lv_label_set_text(body_lbl, msg);
-        lv_label_set_text(hint_lbl, "任意键关闭");
+        popup_show(s_reminder_id);
     } else {
+        if (s_popup) {
+            lv_obj_delete(s_popup);
+            s_popup = NULL;
+        }
+        if ((int)wc_state_page() != s_built_page) {
+            build_layout(wc_state_page());
+            s_built_page = (int)wc_state_page();
+            ui_pixel_mascot_jump(s_mascot);
+        }
         render_page();
     }
     bsp_lvgl_unlock();
@@ -227,7 +276,8 @@ void wc_ui_show_reminder(wc_event_id_t id) {
 
 void wc_ui_init(void) {
     if (bsp_lvgl_lock(1000)) {
-        build_layout();
+        build_layout(WC_PAGE_HOME);
+        s_built_page = WC_PAGE_HOME;
         render_page();
         bsp_lvgl_unlock();
     }
