@@ -169,7 +169,7 @@ static const char *reminder_msg(wc_event_id_t id) {
 
 static void jump_again_cb(lv_timer_t *t)
 {
-    ui_pixel_mascot_jump((lv_obj_t *)t->user_data);
+    if (s_mascot && lv_obj_is_valid(s_mascot)) ui_pixel_mascot_jump(s_mascot);
 }
 
 static void popup_show(wc_event_id_t id) {

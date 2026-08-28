@@ -61,4 +61,10 @@ os.makedirs(os.path.dirname(OUT), exist_ok=True)
 r = subprocess.run(cmd, shell=(os.name == "nt"), capture_output=True, text=True)
 if r.returncode != 0:
     sys.exit(f"lv_font_conv failed:\n{r.stdout}\n{r.stderr}")
+# this BSP exposes lvgl.h directly, not lvgl/lvgl.h
+with open(OUT, encoding="utf-8") as f:
+    src = f.read()
+src = src.replace('#include "lvgl/lvgl.h"', '#include "lvgl.h"')
+with open(OUT, "w", encoding="utf-8") as f:
+    f.write(src)
 print(f"generated {OUT} ({os.path.getsize(OUT)} bytes)")
