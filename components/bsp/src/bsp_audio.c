@@ -8,6 +8,8 @@
 #include "es8311_codec.h"
 #include "driver/i2s_std.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 static const char *TAG = "bsp_audio";
 
@@ -17,6 +19,10 @@ static i2s_chan_handle_t      s_tx, s_rx;
 static uint32_t s_hz;
 static uint8_t  s_bits, s_ch;
 static bool     s_opened;
+// 串行化 close/open(codec 重配)。闹铃播放在 wc_audio 任务、录音在 wc_recorder
+// 任务,二者可能并发调用 bsp_audio_set_format;不互斥会导致对同一
+// esp_codec_dev 同时 close/open,I2S 通道状态错乱甚至崩溃。
+static SemaphoreHandle_t s_fmt_mtx;
 
 static esp_err_t i2s_full_duplex_init(void) {
     i2s_chan_config_t chan = {
@@ -74,6 +80,9 @@ static esp_err_t i2s_full_duplex_init(void) {
 esp_err_t bsp_audio_init(void) {
     if (s_dev) return ESP_OK;
 
+    s_fmt_mtx = xSemaphoreCreateMutex();
+    if (!s_fmt_mtx) return ESP_ERR_NO_MEM;
+
     esp_err_t e = bsp_i2c_init();
     if (e != ESP_OK) return e;
 
@@ -124,7 +133,15 @@ esp_err_t bsp_audio_init(void) {
 
 esp_err_t bsp_audio_set_format(uint32_t hz, uint8_t bits, uint8_t ch) {
     if (!s_dev) return ESP_ERR_INVALID_STATE;
-    if (s_opened && s_hz == hz && s_bits == bits && s_ch == ch) return ESP_OK;   // 同格式复用
+    if (!s_fmt_mtx) return ESP_ERR_INVALID_STATE;
+    /* 整个"检查格式→close→open"是临界区:并发重配会破坏 I2S 通道状态。 */
+    if (xSemaphoreTake(s_fmt_mtx, portMAX_DELAY) != pdTRUE) return ESP_ERR_TIMEOUT;
+
+    esp_err_t ret;
+    if (s_opened && s_hz == hz && s_bits == bits && s_ch == ch) {
+        ret = ESP_OK;                               // 同格式复用,端子已就绪
+        goto done;
+    }
 
     if (s_opened) {
         esp_codec_dev_close(s_dev);
@@ -143,7 +160,7 @@ esp_err_t bsp_audio_set_format(uint32_t hz, uint8_t bits, uint8_t ch) {
         .mclk_multiple = 0,          // 0 → 驱动按默认 256xfs 取 MCLK
     };
     int r = esp_codec_dev_open(s_dev, &fs);
-    if (r != 0) { ESP_LOGE(TAG, "esp_codec_dev_open 失败: %d", r); return ESP_FAIL; }
+    if (r != 0) { ESP_LOGE(TAG, "esp_codec_dev_open 失败: %d", r); ret = ESP_FAIL; goto done; }
 
     // ⚠ open 之后【不要】手动覆写 ES8311 的时钟分频寄存器(REG01~06):
     //   驱动已按采样率与 MCLK 精确算好,覆写会导致 ADC/DAC 时序错乱、录音回放全是杂音。
@@ -152,7 +169,11 @@ esp_err_t bsp_audio_set_format(uint32_t hz, uint8_t bits, uint8_t ch) {
 
     s_opened = true; s_hz = hz; s_bits = bits; s_ch = ch;
     ESP_LOGI(TAG, "codec 打开 %luHz/%ubit/%uch", (unsigned long)hz, bits, ch);
-    return ESP_OK;
+    ret = ESP_OK;
+
+done:
+    xSemaphoreGive(s_fmt_mtx);
+    return ret;
 }
 
 esp_err_t bsp_audio_write(const void *pcm, size_t bytes) {

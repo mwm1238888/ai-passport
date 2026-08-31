@@ -10,6 +10,9 @@
 #include "wc_recorder.h"
 #include "wc_ui.h"
 #include "wc_scheduler.h"
+#include "esp_netif.h"
+#include "esp_event.h"
+#include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -33,6 +36,10 @@ static void controller(void *arg) {
             case WC_EV_OFFWORK:
                 wc_ui_show_reminder(ev.id);
                 break;
+            case WC_EV_WEATHER_OK:
+            case WC_EV_WEATHER_FAIL:
+                wc_ui_weather_event(ev.id);
+                break;
             default:
                 break;
             }
@@ -42,6 +49,16 @@ static void controller(void *arg) {
 }
 
 void app_main(void) {
+    /* ESP-IDF subsystems the BSP does not bring up itself: must run before
+     * any esp_netif / esp_event / NVS / wifi use, or the app panics at boot. */
+    esp_netif_init();
+    esp_event_loop_create_default();
+    esp_err_t nr = nvs_flash_init();
+    if (nr == ESP_ERR_NVS_NO_FREE_PAGES || nr == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        nvs_flash_erase();
+        nvs_flash_init();
+    }
+
     bsp_i2c_init();
     if (bsp_display_init() != ESP_OK) return;
     if (!bsp_lvgl_init()) return;

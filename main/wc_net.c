@@ -11,6 +11,7 @@
 #include "esp_log.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include <string.h>
 #include <time.h>
@@ -27,6 +28,14 @@
 static const char *TAG = "wc_net";
 #define WIFI_NS  "wcomp"
 #define WIFI_KEY "wifi"
+
+/* HTTPS + TLS + cJSON need ~8 KB stack, so the weather fetch runs on its own
+ * task; the controller never blocks on it. */
+#define WC_WX_TASK_STACK 8192
+typedef struct { char city[24]; char key[48]; } wx_req_t;
+static QueueHandle_t           s_wx_req;
+static wc_weather_result_t     s_wx;
+static void weather_task(void *arg);
 
 static volatile bool      s_synced = false;
 static volatile wc_net_state_t s_state = WC_NET_OFFLINE;
@@ -198,6 +207,9 @@ void wc_net_init(void) {
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL);
     esp_sntp_set_time_sync_notification_cb(sntp_cb);
     xTaskCreate(net_task, "wc_net", 6144, NULL, 4, NULL);
+
+    s_wx_req = xQueueCreate(2, sizeof(wx_req_t));
+    xTaskCreate(weather_task, "wc_wx", WC_WX_TASK_STACK, NULL, 3, NULL);
 }
 
 void wc_net_start_provisioning(void) {
@@ -205,41 +217,77 @@ void wc_net_start_provisioning(void) {
     start_ap_provision();
 }
 
-/* ---- weather (QWeather) ---- */
-bool wc_weather_fetch(const char *city, const char *key, wc_weather_t *out) {
-    if (!city || !city[0] || !key || !key[0] || !out) return false;
+/* ---- weather (QWeather) ----
+ * Fetching runs on its own 8 KB task (see the forward declarations near the
+ * top of this file). UI only does an async request and reads the cached result. */
+static void weather_fetch(const wx_req_t *r)
+{
+    wc_weather_t out = {0};
+    bool ok = false;
     char url[160];
     snprintf(url, sizeof(url), "https://%s%s?location=%s&key=%s",
-             WC_WEATHER_HOST, WC_WEATHER_PATH, city, key);
+             WC_WEATHER_HOST, WC_WEATHER_PATH, r->city, r->key);
     esp_http_client_config_t cfg = {
         .url = url, .timeout_ms = 8000, .buffer_size = 2048,
     };
     esp_http_client_handle_t c = esp_http_client_init(&cfg);
-    esp_err_t e = esp_http_client_perform(c);
-    bool ok = false;
-    int code = esp_http_client_get_status_code(c);
-    if (e == ESP_OK && code == 200) {
-        char buf[2048];
-        int n = esp_http_client_read(c, buf, sizeof(buf) - 1);
-        if (n > 0) {
-            buf[n] = 0;
-            cJSON *root = cJSON_Parse(buf);
-            if (root) {
-                cJSON *daily = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "daily"), 0);
-                if (daily) {
-                    cJSON *tmax = cJSON_GetObjectItem(daily, "tempMax");
-                    cJSON *text = cJSON_GetObjectItem(daily, "textDay");
-                    if (tmax) out->temp = tmax->valueint;
-                    if (text && text->valuestring) {
-                        strncpy(out->text, text->valuestring, sizeof(out->text) - 1);
-                        out->text[sizeof(out->text) - 1] = 0;
+    if (c) {
+        esp_err_t e = esp_http_client_perform(c);
+        int code = esp_http_client_get_status_code(c);
+        if (e == ESP_OK && code == 200) {
+            char buf[2048];
+            int n = esp_http_client_read(c, buf, sizeof(buf) - 1);
+            if (n > 0) {
+                buf[n] = 0;
+                cJSON *root = cJSON_Parse(buf);
+                if (root) {
+                    cJSON *daily = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "daily"), 0);
+                    if (daily) {
+                        cJSON *tmax = cJSON_GetObjectItem(daily, "tempMax");
+                        cJSON *text = cJSON_GetObjectItem(daily, "textDay");
+                        if (tmax) out.temp = tmax->valueint;
+                        if (text && text->valuestring) {
+                            strncpy(out.text, text->valuestring, sizeof(out.text) - 1);
+                            out.text[sizeof(out.text) - 1] = 0;
+                        }
+                        ok = true;
                     }
-                    ok = true;
+                    cJSON_Delete(root);
                 }
-                cJSON_Delete(root);
             }
         }
+        esp_http_client_cleanup(c);
     }
-    esp_http_client_cleanup(c);
-    return ok;
+
+    if (ok) {
+        s_wx.temp = out.temp;
+        strncpy(s_wx.text, out.text, sizeof(s_wx.text) - 1);
+        s_wx.text[sizeof(s_wx.text) - 1] = 0;
+        s_wx.available = true;
+    }
+    wc_event_t ev = { .id = ok ? WC_EV_WEATHER_OK : WC_EV_WEATHER_FAIL };
+    wc_state_post(ev);
+}
+
+static void weather_task(void *arg)
+{
+    wx_req_t r;
+    for (;;) {
+        if (xQueueReceive(s_wx_req, &r, portMAX_DELAY) != pdTRUE) continue;
+        weather_fetch(&r);
+    }
+}
+
+void wc_weather_request(const char *city, const char *key)
+{
+    if (!city || !key || !s_wx_req) return;
+    wx_req_t r = {0};
+    strncpy(r.city, city, sizeof(r.city) - 1);
+    strncpy(r.key, key, sizeof(r.key) - 1);
+    xQueueSend(s_wx_req, &r, 0);
+}
+
+const wc_weather_result_t *wc_weather_result(void)
+{
+    return &s_wx;
 }

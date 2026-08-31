@@ -26,8 +26,7 @@ const char *const WC_QUOTES[] = {
 const size_t WC_QUOTES_COUNT = sizeof(WC_QUOTES) / sizeof(WC_QUOTES[0]);
 
 static int  s_quote_idx = 0;
-static int  s_weather_temp = 0;
-static char s_weather_text[32] = "";
+static int  s_weather_status = 0;   /* 0=idle, 1=fetching, 2=ok, 3=fail */
 static bool s_reminder_active = false;
 static wc_event_id_t s_reminder_id = WC_EV_NONE;
 
@@ -99,13 +98,16 @@ static void render_home(void) {
 }
 
 static void render_weather(void) {
+    const wc_weather_result_t *w = wc_weather_result();
     char buf[48];
-    if (s_weather_text[0])
-        snprintf(buf, sizeof(buf), "%d°C\n%s", s_weather_temp, s_weather_text);
+    if (s_weather_status == 1)
+        snprintf(buf, sizeof(buf), "刷新中...");
+    else if (w->available)
+        snprintf(buf, sizeof(buf), "%d°C\n%s", w->temp, w->text);
     else
         snprintf(buf, sizeof(buf), "OK刷新");
     lv_label_set_text(s_body, buf);
-    lv_label_set_text(s_hint, "需配WiFi+天气Key");
+    lv_label_set_text(s_hint, s_weather_status == 3 ? "获取失败,重试" : "需配WiFi+天气Key");
 }
 
 static void render_quote(void) {
@@ -206,12 +208,8 @@ static void on_ok(void) {
     switch (wc_state_page()) {
     case WC_PAGE_WEATHER: {
         const wc_settings_t *s = wc_state_settings();
-        wc_weather_t w = {0};
-        if (wc_weather_fetch(s->weather_city, s->weather_key, &w)) {
-            s_weather_temp = w.temp;
-            strncpy(s_weather_text, w.text, sizeof(s_weather_text) - 1);
-            s_weather_text[sizeof(s_weather_text) - 1] = '\0';
-        }
+        s_weather_status = 1;            /* show "刷新中..." */
+        wc_weather_request(s->weather_city, s->weather_key);
         break;
     }
     case WC_PAGE_QUOTE:
@@ -292,6 +290,10 @@ void wc_ui_refresh(void) {
 void wc_ui_show_reminder(wc_event_id_t id) {
     s_reminder_active = true;
     s_reminder_id = id;
+}
+
+void wc_ui_weather_event(wc_event_id_t id) {
+    s_weather_status = (id == WC_EV_WEATHER_OK) ? 2 : 3;
 }
 
 void wc_ui_init(void) {
