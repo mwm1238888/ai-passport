@@ -31,6 +31,10 @@ static adc_cali_handle_t         s_cali;
 static void on_event(void *arg, void *usr_data, bsp_btn_ev_t ev) {
     (void)arg;
     if (!s_cb) return;
+    /* 诊断:按键事件到达即打印键号/事件/当前 ADC 电压。
+     * 用它二分定位:有打印=硬件+ADC+组件都正常;无打印=卡在 ADC 读数。 */
+    ESP_LOGI(TAG, "KEY idx=%d ev=%d v=%dmV", (int)(intptr_t)usr_data,
+             (int)ev, bsp_button_read_mv());
     s_cb((bsp_btn_t)(intptr_t)usr_data, ev, s_user);
 }
 static void cb_press (void *a, void *u) { on_event(a, u, BSP_BTN_PRESS);  }

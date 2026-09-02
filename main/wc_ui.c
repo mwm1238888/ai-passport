@@ -240,9 +240,13 @@ static void on_ok_long(void) {
 }
 
 void wc_ui_dispatch(const wc_event_t *ev) {
-    if (ev->id != WC_EV_KEY) return;
+    /* 与官方 on_key 一致:本函数可能直接改 LVGL 对象(close_popup/ui_theme_set_id),
+     * 而 esp_lvgl_port 有独立刷新任务,必须持锁才线程安全,否则画面表现为"没反应"。 */
+    if (!bsp_lvgl_lock(500)) return;
+    if (ev->id != WC_EV_KEY) { bsp_lvgl_unlock(); return; }
     if (s_reminder_active) {   /* any key dismisses the popup */
         close_popup();
+        bsp_lvgl_unlock();
         return;
     }
     switch (ev->btn_ev) {
@@ -262,6 +266,7 @@ void wc_ui_dispatch(const wc_event_t *ev) {
         break;
     default: break;
     }
+    bsp_lvgl_unlock();
 }
 
 void wc_ui_refresh(void) {
