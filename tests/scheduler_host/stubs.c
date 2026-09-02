@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L   /* expose nanosleep/gmtime_r on glibc at -std=c11 */
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"

@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L   /* expose nanosleep on glibc at -std=c11 */
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
