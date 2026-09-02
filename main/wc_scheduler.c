@@ -16,6 +16,17 @@ static void post(wc_event_id_t id) {
     wc_state_post(ev);
 }
 
+/* Allow at most one notice per wall-clock minute. Reminder intervals share
+   boundaries (quote 15min divides hydration 60min -> every hour on the hour),
+   and within a minute the scheduler scans many times, so a per-scan flag is
+   not enough to stop two popups stacking. The winning notice consumes the
+   minute; a lower-priority event that was due yields its slot. */
+static bool minute_take(int64_t cur_minute, int64_t *last) {
+    if (*last == cur_minute) return false;
+    *last = cur_minute;
+    return true;
+}
+
 /* local time fields from unix seconds (UTC+8). Returns day index for alarm reset. */
 static void breakdown(int64_t unix, int *hh, int *mm, int *day) {
     time_t t = (time_t)unix + WC_TZ_OFFSET_SEC;
@@ -39,6 +50,7 @@ static void scheduler_task(void *arg) {
     int offwork_done_day = -1;
     int64_t last_hydration = -1;
     int64_t last_quote = -1;
+    int64_t last_notice_minute = -1;
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -56,6 +68,7 @@ static void scheduler_task(void *arg) {
         }
 
         const wc_settings_t *s = wc_state_settings();
+        int64_t cur_minute = (int64_t)day * 1440 + hh * 60 + mm;
 
         /* F1 alarm */
         if (alarm_done_day != day &&
@@ -63,6 +76,7 @@ static void scheduler_task(void *arg) {
             alarm_done_day = day;
             if (!s->muted) wc_audio_play(WC_SOUND_ALARM);
             post(WC_EV_ALARM);
+            last_notice_minute = cur_minute;
         }
 
         /* F6 off-work greeting (silent static reminder — only the alarm is audible) */
@@ -70,6 +84,7 @@ static void scheduler_task(void *arg) {
             hh == s->offwork_h && mm == s->offwork_m) {
             offwork_done_day = day;
             post(WC_EV_OFFWORK);
+            last_notice_minute = cur_minute;
         }
 
         if (!in_work_hours(s, hh, mm)) continue;
@@ -79,21 +94,21 @@ static void scheduler_task(void *arg) {
         uint32_t idle_ms = cur_ms - wc_state_last_activity_ms();
         if (idle_ms >= (uint32_t)s->sedentary_min * 60 * 1000) {
             wc_state_notify_activity();   /* reset idle so it won't immediately refire */
-            post(WC_EV_SEDENTARY);
+            if (minute_take(cur_minute, &last_notice_minute)) post(WC_EV_SEDENTARY);
         }
 
         /* F5 hydration (silent static reminder) */
         if (last_hydration < 0) last_hydration = now;
         if (now - last_hydration >= (int64_t)s->hydration_min * 60) {
             last_hydration = now;
-            post(WC_EV_HYDRATION);
+            if (minute_take(cur_minute, &last_notice_minute)) post(WC_EV_HYDRATION);
         }
 
         /* F3 quote rotation */
         if (last_quote < 0) last_quote = now;
         if (now - last_quote >= (int64_t)s->quote_min * 60) {
             last_quote = now;
-            post(WC_EV_QUOTE_TICK);
+            if (minute_take(cur_minute, &last_notice_minute)) post(WC_EV_QUOTE_TICK);
         }
     }
 }

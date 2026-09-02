@@ -28,6 +28,18 @@ run_static_checks() {
         tests/test_ui_pixel_math.c main/ui_pixel_math.c \
         -o "${test_dir}/test_ui_pixel_math"
     "${test_dir}/test_ui_pixel_math"
+
+    # Scheduler/state host test: drives wc_scheduler + wc_state logic against a
+    # simulated clock with stubbed FreeRTOS/ESP-IDF. -Wno-unused-parameter keeps
+    # -Werror happy across the stub boundary.
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Wno-unused-parameter \
+        -Imain -Itests/scheduler_host/stubs \
+        tests/scheduler_host/stubs.c \
+        tests/scheduler_host/test_scheduler.c \
+        main/wc_state.c main/wc_scheduler.c \
+        -lpthread -o "${test_dir}/test_scheduler"
+    "${test_dir}/test_scheduler"
+
     rm -rf "${test_dir}"
     echo "Host tests: PASS"
 }
